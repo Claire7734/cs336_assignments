@@ -1,9 +1,153 @@
 import regex
 import os
+import json
 from typing import BinaryIO
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
+from collections.abc import Iterable, Iterator
+
+
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+class BPE_Tokenizer:
+
+    vocab: dict[int, bytes]
+    reversed_vocab: dict[bytes, int]
+    merges: list[tuple[bytes, bytes]]
+    merges_rank: dict[tuple[bytes, bytes], int]
+    special_tokens: list[str] | None
+    special_tokens_bytes: list[bytes] | None
+
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        special_tokens: list[str] | None = None,
+    ):
+        self.vocab = vocab
+        self.reversed_vocab = {token_bytes: token_id for token_id, token_bytes in vocab.items()}
+        self.merges = merges
+        self.merges_rank = {pair: idx for idx, pair in enumerate(merges)}
+        self.special_tokens = special_tokens
+        self.special_tokens_bytes = [special_token.encode("utf-8") for special_token in special_tokens] if special_tokens else None
+
+
+# VOCAB_PATH = FIXTURES_PATH / "gpt2_vocab.json"
+# MERGES_PATH = FIXTURES_PATH / "gpt2_merges.txt"
+    @classmethod
+    def from_files(
+        cls,
+        vocab_filepath: str,
+        merges_filepath: str,
+        special_tokens: list[str] | None = None,
+    ):
+        with open(vocab_filepath, "r", encoding='utf-8') as f:
+            vocab = json.load(f)
+
+        merges = []
+        with open(merges_filepath, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            for line in lines:
+                parts = line.strip().split()
+                if len(parts) != 2:
+                    continue
+                merges.append(tuple(parts[0], parts[1]))
+
+        return cls(vocab, merges, special_tokens)
+
+
+    def encode(self, text: str) -> list[int]:
+        token_ids:list[int] = []
+
+        # retain special_tokens
+        special_tokens = self.special_tokens
+        if special_tokens:
+            escaped = [regex.escape(tok) for tok in special_tokens] if special_tokens else None
+            # Sort in descending order of length to prioritize longer matches
+            escaped.sort(key=lambda x: -len(x))
+            split_pattern = f"({'|'.join(escaped)})"
+            parts = regex.split(split_pattern, text)
+        else:
+            parts = [text]
+
+        def process_part(part: str, index: int) -> tuple[int, list[int]]:
+            part_tokens = []
+            if special_tokens and part in special_tokens:
+                token_bytes = part.encode("utf-8")
+                token_id = self.reversed_vocab[token_bytes]
+                part_tokens.append(token_id)
+            else:
+                words = regex.finditer(PAT, part)
+                for word in words:
+                    token_bytes = word.group().encode("utf-8")
+                    list_of_bytes = [bytes([b]) for b in token_bytes]
+                    bpe_tokens = apply_bpe(list_of_bytes, self.merges_rank)
+                    for token in bpe_tokens:
+                        # TODO what to do if token not found in vocab?
+                        if token in self.reversed_vocab:
+                            part_tokens.append(self.reversed_vocab[token])
+            return (index, part_tokens)
+
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            for i, part in enumerate(parts):
+                futures.append(executor.submit(process_part, part, i))
+            results = [future.result() for future in futures]
+            results.sort(key=lambda x: x[0])
+            for _, tokens in results:
+                token_ids.extend(tokens)
+
+        return token_ids
+
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        for text in iterable:
+            yield from self.encode(text)
+
+
+    def decode(self, token_ids: list[int]) -> str:
+        token_bytes = []
+        for token_id in token_ids:
+            if token_id in self.vocab:
+                token_bytes.append(self.vocab[token_id])
+            else:
+                token_bytes.append(b"")  # or b"<unk>" 空字节或占位符
+        combined_bytes  = b"".join(token_bytes)
+        return combined_bytes.decode("utf-8", errors="replace")
+
+
+def apply_bpe(
+        tokens: list[bytes],
+        merges_rank: dict[tuple[bytes, bytes], int],
+) -> list[bytes]:
+
+    while True:
+        min_rank = len(merges_rank)
+        best_pair = None
+        for i in range(len(tokens) - 1):
+            pair = (tokens[i], tokens[i + 1])
+            rank = merges_rank.get(pair, float('inf'))
+            if rank < min_rank:
+                min_rank = rank
+                best_pair = pair
+
+        if best_pair is None:
+            break
+
+        new_tokens = []
+        i = 0
+        while i < len(tokens):
+            if i + 1 < len(tokens) and (tokens[i], tokens[i + 1]) == best_pair:
+                new_tokens.append(best_pair[0] + best_pair[1])
+                i += 2
+            else:
+                new_tokens.append(tokens[i])
+                i += 1
+
+        tokens = new_tokens
+
+    return tokens
 
 
 def initialize_vocab(
@@ -89,7 +233,7 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
-def process_chunk(chunk, escaped, PAT):
+def process_chunk(chunk, escaped):
     local_table = defaultdict(int)
     parts = regex.split("|".join(escaped), chunk)
     for part in parts:
@@ -115,7 +259,6 @@ def pre_tokenization(
     num_processes,
     parallelized = False,
 ) -> list[tuple[bytes], int]:
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
     special_tokens = [special_token_bytes.decode("utf-8", errors="ignore") for special_token_bytes in special_tokens_bytes]
     escaped = [regex.escape(tok) for tok in special_tokens]
 
@@ -146,7 +289,7 @@ def pre_tokenization(
 
     if parallelized:
         with ThreadPoolExecutor(max_workers=num_processes) as executor:
-            futures = [executor.submit(process_chunk, chunk, escaped, PAT) for chunk in chunks]
+            futures = [executor.submit(process_chunk, chunk, escaped) for chunk in chunks]
             results = [f.result() for f in futures]
 
         return list(merge_tables(results).items())

@@ -10,6 +10,11 @@ import torch
 from torch import Tensor
 
 
+import debugpy
+debugpy.listen(("localhost", 5678))  # Or use "localhost" if local
+print("🔍 Waiting for debugger attach...")
+debugpy.wait_for_client()
+
 
 def run_linear(
     d_in: int,
@@ -558,7 +563,9 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    from cs336_basics.bpe_tokenizer import BPE_Tokenizer
+    tokenizer = BPE_Tokenizer(vocab, merges, special_tokens)
+    return tokenizer
 
 
 def run_train_bpe(
