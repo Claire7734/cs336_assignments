@@ -313,7 +313,34 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    from cs336_basics.model import TransformerBlock
+    transformer_block = TransformerBlock(
+            d_model=d_model,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            max_seq_len=max_seq_len,
+            theta=theta,
+    )
+
+    attention = transformer_block.attn
+    state_dict = {"weight": weights['attn.q_proj.weight']}
+    attention.q_proj.load_state_dict(state_dict)
+    state_dict = {"weight": weights['attn.k_proj.weight']}
+    attention.k_proj.load_state_dict(state_dict)
+    state_dict = {"weight": weights['attn.v_proj.weight']}
+    attention.v_proj.load_state_dict(state_dict)
+    state_dict = {"weight": weights['attn.output_proj.weight']}
+    attention.out_proj.load_state_dict(state_dict)
+
+    state_dict = {"weight": weights['ln1.weight']}
+    transformer_block.ln1.load_state_dict(state_dict)
+    state_dict = {"weight": weights['ln2.weight']}
+    transformer_block.ln2.load_state_dict(state_dict)
+
+    state_dict = {"w1": weights['ffn.w1.weight'], "w2": weights['ffn.w2.weight'], "w3": weights['ffn.w3.weight']}
+    transformer_block.ffn.load_state_dict(state_dict)
+
+    return transformer_block(in_features)
 
 
 def run_transformer_lm(
@@ -395,7 +422,61 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from cs336_basics.model import TransformerLM
+    # Initialize the Transformer model
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    )
+
+    # Load the weights
+    state_dict = {"weight": weights['token_embeddings.weight']}
+    model.token_embeddings.load_state_dict(state_dict)
+
+    for layer in range(num_layers):
+        # Access components for the layer
+        transformer_block = model.layers[layer]
+        attention = transformer_block.attn
+
+        # Load attention weights
+        state_dict = {"weight": weights[f'layers.{layer}.attn.q_proj.weight']}
+        attention.q_proj.load_state_dict(state_dict)
+        state_dict = {"weight": weights[f'layers.{layer}.attn.k_proj.weight']}
+        attention.k_proj.load_state_dict(state_dict)
+        state_dict = {"weight": weights[f'layers.{layer}.attn.v_proj.weight']}
+        attention.v_proj.load_state_dict(state_dict)
+        state_dict = {"weight": weights[f'layers.{layer}.attn.output_proj.weight']}
+        attention.out_proj.load_state_dict(state_dict)
+
+        # Load layer normalization weights
+        state_dict = {"weight": weights[f'layers.{layer}.ln1.weight']}
+        transformer_block.ln1.load_state_dict(state_dict)
+        state_dict = {"weight": weights[f'layers.{layer}.ln2.weight']}
+        transformer_block.ln2.load_state_dict(state_dict)
+
+        # Load feed-forward network weights
+        state_dict = {
+            "w1": weights[f'layers.{layer}.ffn.w1.weight'],
+            "w2": weights[f'layers.{layer}.ffn.w2.weight'],
+            "w3": weights[f'layers.{layer}.ffn.w3.weight']
+        }
+        transformer_block.ffn.load_state_dict(state_dict)
+
+    # Load final layer normalization weights
+    state_dict = {"weight": weights['ln_final.weight']}
+    model.ln_final.load_state_dict(state_dict)
+
+    # Load language model head weights
+    state_dict = {"weight": weights['lm_head.weight']}
+    model.lm_head.load_state_dict(state_dict)
+
+    # Forward pass through the model and return the output
+    return model(in_indices)
 
 
 def run_rmsnorm(
