@@ -10,10 +10,10 @@ import torch
 from torch import Tensor
 
 
-import debugpy
-debugpy.listen(("localhost", 5678))  # Or use "localhost" if local
-print("🔍 Waiting for debugger attach...")
-debugpy.wait_for_client()
+# import debugpy
+# debugpy.listen(("localhost", 5678))  # Or use "localhost" if local
+# print("🔍 Waiting for debugger attach...")
+# debugpy.wait_for_client()
 
 
 def run_linear(
@@ -35,8 +35,8 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
 
-    from cs336_basics.linear import Linear_nobias
-    linear = Linear_nobias(d_in, d_out)
+    from cs336_basics.linear import LinearNobias
+    linear = LinearNobias(d_in, d_out)
     state_dict = {"weight": weights}
     linear.load_state_dict(state_dict)
     return linear(in_features)
@@ -97,8 +97,11 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
-
+    from cs336_basics.activation import SwiGLU
+    swiglu = SwiGLU(d_model, d_ff)
+    state_dict = {"w1": w1_weight, "w2": w2_weight, "w3": w3_weight}
+    swiglu.load_state_dict(state_dict)
+    return swiglu(in_features)
 
 def run_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
@@ -118,7 +121,8 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    from cs336_basics.attention import scaled_dot_product_attention
+    return scaled_dot_product_attention(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
@@ -152,7 +156,17 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.attention import MultiheadAttention
+    attention = MultiheadAttention(d_model, num_heads)
+    state_dict = {"weight": q_proj_weight}
+    attention.q_proj.load_state_dict(state_dict)
+    state_dict = {"weight": k_proj_weight}
+    attention.k_proj.load_state_dict(state_dict)
+    state_dict = {"weight": v_proj_weight}
+    attention.v_proj.load_state_dict(state_dict)
+    state_dict = {"weight": o_proj_weight}
+    attention.out_proj.load_state_dict(state_dict)
+    return attention(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -192,7 +206,17 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.attention import MultiheadAttention
+    attention = MultiheadAttention(d_model, num_heads, max_seq_len, theta)
+    state_dict = {"weight": q_proj_weight}
+    attention.q_proj.load_state_dict(state_dict)
+    state_dict = {"weight": k_proj_weight}
+    attention.k_proj.load_state_dict(state_dict)
+    state_dict = {"weight": v_proj_weight}
+    attention.v_proj.load_state_dict(state_dict)
+    state_dict = {"weight": o_proj_weight}
+    attention.out_proj.load_state_dict(state_dict)
+    return attention(in_features)
 
 
 def run_rope(
@@ -214,7 +238,9 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    from cs336_basics.embedding import RotaryPositionalEmbedding
+    rope = RotaryPositionalEmbedding(theta, d_k, max_seq_len)
+    return rope(in_query_or_key, token_positions)
 
 
 def run_transformer_block(
@@ -392,7 +418,12 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    from cs336_basics.normalization import RMSNorm
+    norm = RMSNorm(d_model, eps)
+
+    state_dict = {"weight": weights}
+    norm.load_state_dict(state_dict)
+    return norm(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -445,7 +476,8 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    from cs336_basics.attention import softmax
+    return softmax(in_features, dim)
 
 
 def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:

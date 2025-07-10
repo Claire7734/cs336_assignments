@@ -1,8 +1,8 @@
+from unittest import result
 import torch
 import math
 from torch import Tensor, nn
 from torch.nn.parameter import Parameter
-from einops import einsum
 
 def init_trunc_normal_linear(weight: torch.Tensor):
     """
@@ -16,31 +16,32 @@ def init_trunc_normal_linear(weight: torch.Tensor):
 
     nn.init.trunc_normal_(weight, mean=0.0, std=std, a=a, b=b)
 
-class LinearNobias(nn.Module):
+class RMSNorm(nn.Module):
 
-    __constants__ = ["in_features", "out_features"]
-    in_features: int
-    out_features: int
+    d_model: int
+    eps: float
     weight: Tensor
 
     def __init__(
         self,
-        in_features: int,
-        out_features: int,
+        d_model: int,
+        eps: float = 1e-5,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
+        self.d_model = d_model
+        self.eps = eps
         self.weight = Parameter(
-            torch.empty((out_features, in_features), **factory_kwargs)
+            torch.ones((d_model,), **factory_kwargs)
         )
-        init_trunc_normal_linear(self.weight)
 
-    def forward(self, input: Tensor) -> Tensor:
-        # input @ self.weight.T
-        # input: (..., d_in)
-        # weight: (d_out, d_in)
-        return einsum(input, self.weight, "... d_in, d_out d_in -> ... d_out")
+    def forward(self, x: Tensor) -> Tensor:
+        # x: (batch_size, sequence_length, d_model)
+        # output: (batch_size, sequence_length, d_model)
+        in_dtype = x.dtype
+        x_fp32 = x if x.dtype == torch.float32 else x.to(torch.float32)
+        rms = (x_fp32.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
+        result = self.weight * (x_fp32 / rms)
+        return result.to(in_dtype)
