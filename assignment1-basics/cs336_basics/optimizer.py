@@ -38,6 +38,25 @@ def get_lr_cosine_schedule(t, alpha_max, alpha_min, Tw, Tc):
         return alpha_min + 0.5 * (1 + cos_val) * (alpha_max - alpha_min)
 
 
+def gradient_clipping(parameters, max_norm):
+    epsilon = 1e-6
+    total_norm = 0.0
+
+    # Compute the total L2 norm of the gradients
+    for param in parameters:
+        if param.grad is not None:
+            total_norm += param.grad.data.norm(2).item() ** 2
+
+    total_norm = total_norm ** 0.5
+
+    # Clip the gradients if the total norm exceeds max_norm
+    clip_coef = max_norm / (total_norm + epsilon)
+    if clip_coef < 1:
+        for param in parameters:
+            if param.grad is not None:
+                param.grad.data.mul_(clip_coef)
+
+
 class SGD(torch.optim.Optimizer):
 
     def __init__(self, params, lr=1e-3):
@@ -116,6 +135,33 @@ class AdamW(torch.optim.Optimizer):
                     p.data.mul_(1 - group['lr'] * group['weight_decay'])
 
         return loss
+
+
+def save_checkpoint(model, optimizer, iteration, out):
+    """Save a checkpoint of the model, optimizer, and current iteration."""
+    # Create a dictionary to store the relevant states
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'iteration': iteration
+    }
+    # Save the checkpoint dictionary to the given output path or file-like object
+    torch.save(checkpoint, out)
+
+
+def load_checkpoint(src, model, optimizer):
+    """Load a checkpoint and restore the model and optimizer states."""
+    # Load the checkpoint from the source path or file-like object
+    checkpoint = torch.load(src)
+    
+    # Restore the model's state using the checkpoint data
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Restore the optimizer's state using the checkpoint data
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Return the saved iteration number to resume training
+    return checkpoint['iteration']
 
 
 if __name__ == "__main__":
